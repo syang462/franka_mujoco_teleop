@@ -1,0 +1,21 @@
+colcon build --packages-select mujoco_ros2_control --cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+colcon build --packages-select haptic_device --cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+
+"/home/ao/mujoco_menagerie/franka_emika_panda/my_scene.xml"
+
+
+ros2 run mujoco_ros2_control ros_control -- /home/ao/mujoco_menagerie/franka_emika_panda/my_scene.xml
+
+
+source ~/franka_mujoco/install/setup.bash
+
+
+ros2 run --prefix "gdb --args" mujoco_ros2_control ros_control /home/ao/mujoco_menagerie/franka_emika_panda/scene.xml
+
+
+ros2 topic pub --once /toggle_mode std_msgs/msg/Int32 "{data: 1}"
+
+
+ros2 launch --debug mucojo_teleop.launch.py

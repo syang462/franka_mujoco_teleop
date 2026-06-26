@@ -1,0 +1,36 @@
+# Build directories
+build/
+install/
+log/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# VSCode
+.vscode/
+*.code-workspace
+
+# IDE files
+*.swp
+*.swo
+*~
+
+# Compiled files
+*.o
+*.so
+*.a
+*.exe
+
+# DS Store (macOS)
+.DS_Store
+
+# Colcon build files
+COLCON_IGNORE
+*.cmake
+CMakeCache.txt
+Makefile
+cmake_install.cmake
+
+# Debug symbols
+*.dSYM/
