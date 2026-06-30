@@ -19,3 +19,9 @@ ros2 topic pub --once /toggle_mode std_msgs/msg/Int32 "{data: 1}"
 
 
 ros2 launch --debug mucojo_teleop.launch.py
+
+
+
+
+
+colcon build --packages-select mujoco_ros2_control --cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON

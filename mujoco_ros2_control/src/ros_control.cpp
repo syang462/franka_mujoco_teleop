@@ -30,7 +30,6 @@
 #include <vector>
 #include <Eigen/Dense>
 
-
 // MuJoCo data structures
 mjModel* m = NULL;                  // MuJoCo model
 mjData* d = NULL;                   // MuJoCo data
@@ -464,6 +463,9 @@ private:
 
   void robotForceToHapticForce(Eigen::VectorXd F_ext)
     {
+
+        F_ext *= 0.3;
+        
         Eigen::Vector3d robot_force_in(-F_ext.x(), -F_ext.y(), -F_ext.z());
         // Axis remapping: robot frame → haptic device frame
         geometry_msgs::msg::Vector3 force_out;
@@ -480,7 +482,7 @@ private:
         static geometry_msgs::msg::Vector3 filtered_force;
         static bool initialized = false;
         if (USE_LOW_PASS_FILTER) {
-            const double alpha = 0.005;
+            const double alpha = 0.01;
             if (!initialized) { filtered_force = force_out; initialized = true; }
             else {
                 filtered_force.x = alpha * force_out.x + (1.0 - alpha) * filtered_force.x;
@@ -502,11 +504,17 @@ private:
 
         if (!FORCE_OUTPUT_ENABLED || nearSwitch) force_out.x = force_out.y = force_out.z = 0.0;
         
-        if(inside_workspace){
-          haptic_force_pub_->publish(force_out); 
+        bool renderWalls = false;
+        if(renderWalls){
+          if(inside_workspace){
+            haptic_force_pub_->publish(force_out); 
+          }else{
+            haptic_force_pub_->publish(wall_force); 
+          }
         }else{
-          haptic_force_pub_->publish(wall_force); 
+          haptic_force_pub_->publish(force_out); 
         }
+        
         
     }
 
@@ -635,7 +643,7 @@ private:
     Eigen::VectorXd q_target = J_pinv * cart_vel;
     q_dot = q_target - state.qdot;
     tau = q_dot.cwiseProduct(d_gains);
-
+    
     robotForceToHapticForce(state.external_force.head<3>());
     //RCLCPP_INFO_STREAM(this->get_logger(), "external_force head<3>: " << state.external_force.head<3>().transpose());
 
