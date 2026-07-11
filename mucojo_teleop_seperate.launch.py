@@ -20,7 +20,11 @@ def generate_launch_description():
     return LaunchDescription([
         haptic_device_node,
         ExecuteProcess(
-            cmd=['ros2', 'run', 'mujoco_ros2_robot', 'ros_control', model_path],
+            cmd=['ros2', 'run', 'mujoco_sim_node', 'mujoco_node', model_path],
+            output='screen'
+        ),
+        ExecuteProcess(
+            cmd=['ros2', 'run', 'controller_node', 'controller_node', model_path],
             output='screen'
         )
     ])

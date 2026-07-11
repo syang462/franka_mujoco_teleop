@@ -294,9 +294,6 @@ std::mutex sim_mutex_;      // guards all access to mjModel*/mjData* (m, d)
 std::mutex state_mutex_;    // guards latest_state_ (cheap struct copy only)
 RobotState latest_state_;
 
-std::mutex cmd_mutex_;                                   // guards command_interfaces_
-std::array<double, N_ARM_JOINTS> command_interfaces_{};  // desired tau, written by controlLoop, read by robotStateLoop
-
 rclcpp::TimerBase::SharedPtr robot_loop_timer_;
 
 
@@ -534,14 +531,6 @@ private:
   void robotStateLoop() {
       RobotState new_state;
 
-      // Snapshot the latest commanded torques outside of sim_mutex_ to keep
-      // the physics-critical section as short as possible.
-      std::array<double, N_ARM_JOINTS> cmd_local;
-      {
-          std::lock_guard<std::mutex> lock(cmd_mutex_);
-          cmd_local = command_interfaces_;
-      }
-
       std::vector<int> joint_ids_local = {
           joint_ids[0], joint_ids[1], joint_ids[2], joint_ids[3],
           joint_ids[4], joint_ids[5], joint_ids[6]
@@ -549,12 +538,6 @@ private:
 
       {
           std::lock_guard<std::mutex> lock(sim_mutex_);
-
-          // "Hardware interface" write: apply the last commanded torques
-          // before stepping, same as a real ros2_control write() call.
-          for (int i = 0; i < N_ARM_JOINTS; i++) {
-              d->ctrl[actuator_ids[i]] = cmd_local[i];
-          }
 
           mj_step(m, d);
 
@@ -574,6 +557,8 @@ private:
           std::lock_guard<std::mutex> lock(state_mutex_);
           latest_state_ = new_state;
       }
+
+      
   }
 
 
@@ -615,12 +600,14 @@ private:
         tau = q_dot.cwiseProduct(d_gains);
 
         {
-            std::lock_guard<std::mutex> lock(cmd_mutex_);
+            std::lock_guard<std::mutex> lock(sim_mutex_);
             for (int i = 0; i < N_ARM_JOINTS; i++) {
-                command_interfaces_[i] = tau(i);
+                d->ctrl[actuator_ids[i]] = tau(i);
             }
         }
 
+        //RCLCPP_INFO(this->get_logger(), "q_dot norm: %.4f", q_dot.norm());
+        //RCLCPP_INFO(this->get_logger(), "tau norm: %.4f", tau.norm());
         return;
     }
 
@@ -656,13 +643,14 @@ private:
     Eigen::VectorXd q_target = J_pinv * cart_vel;
     q_dot = q_target - state.qdot;
     tau = q_dot.cwiseProduct(d_gains);
-
+    
     robotForceToHapticForce(state.external_force.head<3>());
+    //RCLCPP_INFO_STREAM(this->get_logger(), "external_force head<3>: " << state.external_force.head<3>().transpose());
 
     {
-        std::lock_guard<std::mutex> lock(cmd_mutex_);
+        std::lock_guard<std::mutex> lock(sim_mutex_);
         for (int i = 0; i < N_ARM_JOINTS; i++) {
-            command_interfaces_[i] = tau[i];
+            d->ctrl[actuator_ids[i]] = tau[i];
         }
     }
 
@@ -754,18 +742,19 @@ int main(int argc, const char** argv) {
 
     // I moved mujoco step to the control loop
 
+    // get framebuffer viewport
     mjrRect viewport = {0, 0, 0, 0};
     glfwGetFramebufferSize(window, &viewport.width, &viewport.height);
 
-    {
-        std::lock_guard<std::mutex> lock(sim_mutex_);
-        mjv_updateScene(m, d, &opt, NULL, &cam, mjCAT_ALL, &scn);
-    }
+    // update scene and render
+    mjv_updateScene(m, d, &opt, NULL, &cam, mjCAT_ALL, &scn);
     mjr_render(viewport, &scn, &con);
 
+    // swap OpenGL buffers (blocking call due to v-sync)
     glfwSwapBuffers(window);
-    glfwPollEvents();
 
+    // process pending GUI events, call GLFW callbacks
+    glfwPollEvents();
   }
 
   // ========== ADDED: Clean shutdown of ROS spinner ==========
