@@ -1,0 +1,37 @@
+Wed Jul 22 13:47:52 2026
+ERROR: Load model error: XML parse error 6:
+Error=XML_ERROR_PARSING_ELEMENT ErrorID=6 (0x6) Line number=23
+
+
+Wed Jul 22 14:08:48 2026
+ERROR: mj_narrowphase: collision function returned 9 contacts for geom pair (82, 83), expected at most 8 from mj_maxContact
+
+Wed Jul 22 15:15:40 2026
+ERROR: mj_narrowphase: collision function returned 9 contacts for geom pair (84, 85), expected at most 8 from mj_maxContact
+
+Wed Jul 22 15:32:49 2026
+ERROR: mj_narrowphase: collision function returned 9 contacts for geom pair (82, 83), expected at most 8 from mj_maxContact
+
+Wed Jul 22 18:17:35 2026
+ERROR: Load model error: XML Error: Schema violation: unrecognized element
+Element 'asset', line 38
+
+
+Wed Jul 22 18:23:25 2026
+ERROR: Load model error: Error: Error opening file 'assets/foam_be.stl'
+
+Wed Jul 22 19:56:55 2026
+ERROR: Load model error: XML Error: Schema violation: unrecognized attribute: 'convexhull'
+Element 'compiler', line 2
+
+
+Wed Jul 22 20:05:00 2026
+ERROR: Load model error: XML Error: Schema violation: unrecognized attribute: 'convexhull'
+Element 'compiler', line 2
+
+
+Wed Jul 22 20:09:05 2026
+ERROR: Load model error: XML Error: Schema violation: unrecognized attribute: 'convex'
+Element 'geom', line 22
+
+

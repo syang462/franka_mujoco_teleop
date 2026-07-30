@@ -15,7 +15,7 @@ def generate_launch_description():
         output='screen'
     )
 
-    model_path = os.path.expanduser('/home/ao/mujoco_menagerie/franka_emika_panda/my_scene.xml')
+    model_path = os.path.expanduser('/home/ao/mujoco_menagerie/franka_emika_panda/my_scene_insert.xml') #my_scene_insert
     
     return LaunchDescription([
         haptic_device_node,

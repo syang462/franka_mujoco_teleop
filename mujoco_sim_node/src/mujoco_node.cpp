@@ -43,7 +43,7 @@
 #include <vector>
 #include <Eigen/Dense>
 
-
+#include <random>
 
 // MuJoCo data structures
 mjModel* m = NULL;                  // MuJoCo model
@@ -230,6 +230,7 @@ Eigen::MatrixXd get_jacobian_reduced(mjModel* model, mjData* data, int body_id, 
 Eigen::VectorXd get_external_force(mjModel* model, mjData* data,
                                     int body_id,
                                     const std::vector<int>& arm_joint_ids,
+                                    const Eigen::VectorXd& noise_std,
                                     double damping = 1e-4)
 {
     const int n = static_cast<int>(arm_joint_ids.size()); // 7
@@ -238,6 +239,19 @@ Eigen::VectorXd get_external_force(mjModel* model, mjData* data,
     for (int i = 0; i < n; ++i) {
         tau_measured(i) = data->sensordata[torque_sensor_adrs_[i] + 2];
     }
+
+    static std::random_device rd;
+    static std::mt19937 generator(rd());
+
+    for (int i = 0; i < n; ++i) {
+        std::normal_distribution<double> noise_distribution(
+            0.0,
+            noise_std(i)
+        );
+
+        tau_measured(i) += noise_distribution(generator);
+    }
+
 
     Eigen::VectorXd tau_model_full(model->nv);
     mj_rne(model, data, /*flg_acc=*/1, tau_model_full.data());
@@ -319,7 +333,10 @@ public:
 
 private:
 
-    Eigen::VectorXd d_gains{{30, 30, 25, 25, 15, 10, 5}};
+    Eigen::VectorXd d_gains{{50, 50, 45, 45, 15, 10, 5}};
+
+    float noiseVal = 0.5;
+    Eigen::VectorXd noise_std{{noiseVal, noiseVal, noiseVal, noiseVal, noiseVal, noiseVal, noiseVal}};
 
     std::mutex cmd_mutex_;
     Eigen::VectorXd target_joint_vel_{{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}};
@@ -337,11 +354,12 @@ private:
 
     struct GripperCommand {
         double target_width   = kMaxGripperWidth;
-        double speed           = 0.1;   // m/s ramp rate on the commanded setpoint
-        double force            = 40.0;  // N, applied as a runtime forcerange clamp
+        double speed           = 0.5;   // m/s ramp rate on the commanded setpoint
+        double force            = 100.0;  // N, applied as a runtime forcerange clamp
         double epsilon_inner  = 0.005;
         double epsilon_outer  = 0.005;
         bool   check_epsilon    = false; // true = grasp semantics, false = plain move
+        bool open = false;
     };
 
     std::mutex gripper_cmd_mutex_;
@@ -363,14 +381,14 @@ private:
         last_button_state_ = msg->data;
 
         if (msg->data == 1) {
-            commandGripper(0.0, 0.1, 40.0, 0.005, 0.005, true);
+            commandGripper(0.0, 0.1, 200.0, 0.005, 0.005, true, false);
         } else if (msg->data == 2) {
-            commandGripper(kMaxGripperWidth, 0.1, 40.0, 0.0, 0.0, false);
+            commandGripper(kMaxGripperWidth, 0.1, 200.0, 0.0, 0.0, false, true);
         }
     }
 
     void commandGripper(double target_width, double speed, double force,
-                        double eps_inner, double eps_outer, bool check_epsilon) {
+                        double eps_inner, double eps_outer, bool check_epsilon, bool open) {
         std::lock_guard<std::mutex> lock(gripper_cmd_mutex_);
         gripper_cmd_.target_width  = std::clamp(target_width, 0.0, kMaxGripperWidth);
         gripper_cmd_.speed          = speed;
@@ -378,6 +396,7 @@ private:
         gripper_cmd_.epsilon_inner = eps_inner;
         gripper_cmd_.epsilon_outer = eps_outer;
         gripper_cmd_.check_epsilon   = check_epsilon;
+        gripper_cmd_.open = open;
         gripper_settled_ = false;
         gripper_stall_timer_ = 0.0;   // reset on every new command
         // Honor the requested force as an actual force limit on the actuator.
@@ -462,7 +481,7 @@ private:
             new_state.q    = get_current_joint_positions(m, d, joint_ids_local);
             new_state.qdot = get_current_joint_velocities(m, d, joint_ids_local);
             new_state.jacobian = get_jacobian_reduced(m, d, ee_body_id, joint_ids_local);
-            new_state.external_force = get_external_force(m, d, ee_body_id, joint_ids_local);
+            new_state.external_force = get_external_force(m, d, ee_body_id, joint_ids_local, noise_std);
 
             get_end_effector_pose(d, ee_body_id, new_state.ee_pos, new_state.ee_orientation);
             get_end_effector_velocity(d, ee_body_id, new_state.ee_vel, new_state.ee_angular_vel);
@@ -487,7 +506,14 @@ private:
         double current_width = 2.0 * d->qpos[m->jnt_qposadr[gripper_finger_joint_id]];
 
         double max_step = cmd.speed * dt;
-        double err = cmd.target_width - gripper_commanded_width_;
+
+        double err;
+        if(cmd.open){
+          err = cmd.target_width - gripper_commanded_width_;
+        }else{
+          err = -gripper_commanded_width_;
+        }
+        
         gripper_commanded_width_ += std::clamp(err, -max_step, max_step);
 
         double ctrl = std::clamp(gripper_commanded_width_ / kMaxGripperWidth * kGripperCtrlMax,

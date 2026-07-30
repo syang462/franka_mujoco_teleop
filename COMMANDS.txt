@@ -25,3 +25,20 @@ ros2 launch --debug mucojo_teleop.launch.py
 
 
 colcon build --packages-select mujoco_ros2_control --cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+
+export ROS_DOMAIN_ID=47
+
+
+colcon build --packages-select controller_node --cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+colcon build --packages-select mujoco_sim_node --cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+
+colcon build --cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+mujoco_sim_node
+
+ros2 topic pub --once /stiffness std_msgs/msg/Float64 "{data: 2000}"
+
+ros2 topic pub --once /stiffness std_msgs/msg/Float64 "{data: 200}"

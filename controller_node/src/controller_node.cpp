@@ -22,6 +22,7 @@
 #include <geometry_msgs/msg/wrench_stamped.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
 #include <std_msgs/msg/int32.hpp>
+#include <std_msgs/msg/float64.hpp>
 #include <std_msgs/msg/float64_multi_array.hpp>
 
 #include <Eigen/Dense>
@@ -120,6 +121,10 @@ public:
                     mode_, mode_ == 0 ? "HOME pose" : "Haptic follow");
             });
 
+        stiffness_sub_ = this->create_subscription<std_msgs::msg::Float64>(
+            "/stiffness", 10,
+            std::bind(&HapticControllerNode::stiffnessCallback, this, std::placeholders::_1));
+
         // ---- Outputs ----
         target_vel_pub_ = this->create_publisher<std_msgs::msg::Float64MultiArray>(
             "/target_joint_velocities", 1);
@@ -139,7 +144,7 @@ private:
 
     double m_ = 10;
     double zeta = 1.5;
-    double k_ = 1000;
+    double k_ = 200; //100 -> 2000
     double d_ = 2.0 * zeta * std::sqrt(m_ * k_);
     int mode_ = 0;
 
@@ -154,6 +159,8 @@ private:
     double position_scale_z_ = 4.0;
     double height_offset_ = 0.3;
     double max_force_output_ = 5.0;
+
+    Eigen::Vector3d robot_force_;
 
     bool inside_workspace = false;
     bool nearSwitch = false;
@@ -173,12 +180,20 @@ private:
     rclcpp::Subscription<geometry_msgs::msg::WrenchStamped>::SharedPtr wrench_sub_;
     rclcpp::Subscription<geometry_msgs::msg::Pose>::SharedPtr haptic_pose_sub_;
     rclcpp::Subscription<std_msgs::msg::Int32>::SharedPtr mode_sub_;
+    rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr stiffness_sub_;
+
 
     rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr target_vel_pub_;
     rclcpp::Publisher<geometry_msgs::msg::Vector3>::SharedPtr haptic_force_pub_;
 
+    void stiffnessCallback(const std_msgs::msg::Float64::SharedPtr msg) {
+        k_ = msg->data;
+        d_ = 2.0 * zeta * std::sqrt(m_ * k_);
+        RCLCPP_INFO(this->get_logger(), "Stiffness updated: K = %.2f, D (calculated) = %.2f", k_, d_);
+    }
+
     void hapticPoseCallback(const geometry_msgs::msg::Pose::SharedPtr msg) {
-        target_pose.x() = (-msg->position.z * position_scale_x_) + height_offset_;
+        target_pose.x() = (-msg->position.z * position_scale_x_) + 0.35;
         target_pose.y() = -msg->position.x * position_scale_y_;
         target_pose.z() = (msg->position.y * position_scale_z_) + height_offset_;
     
@@ -191,9 +206,9 @@ private:
         Eigen::Quaterniond haptic_orientation(
             msg->orientation.w, msg->orientation.x, msg->orientation.y, msg->orientation.z);
 
-        const double x_min=0.2, x_max=0.6;
+        const double x_min=0.2, x_max=0.7;
         const double y_min=-0.25, y_max=0.25;
-        const double z_min=0.13, z_max=0.70;
+        const double z_min=0.03, z_max=0.70;
 
         inside_workspace =
             (target_pose.x() >= x_min && target_pose.x() <= x_max) &&
@@ -244,9 +259,15 @@ private:
 
     void robotForceToHapticForce(Eigen::VectorXd F_ext)
     {
-        F_ext *= 0.3;
+
+        
+
+        F_ext *= 0.25; //0.3
 
         Eigen::Vector3d robot_force_in(-F_ext.x(), -F_ext.y(), -F_ext.z());
+
+        robot_force_ = robot_force_in;
+
         geometry_msgs::msg::Vector3 force_out;
         force_out.x = -robot_force_in.y();
         force_out.y =  robot_force_in.z();
@@ -329,7 +350,14 @@ private:
 
         Eigen::Vector3d error = state.ee_pos - target_pose;
 
-        Eigen::Vector3d effective_force = Eigen::Vector3d::Zero();
+        Eigen::Vector3d effective_force;
+        
+        bool readForce = true;
+        if (readForce){
+            effective_force = 0.5*robot_force_;
+        }else{
+            effective_force = Eigen::Vector3d::Zero();
+        }
         // state.external_force.head<3>() is sitting right here whenever
         // you're ready to feed measured contact force into this admittance law.
 
@@ -340,7 +368,7 @@ private:
         q_err.normalize();
         if (q_err.w() < 0.0) q_err.coeffs() = -q_err.coeffs();
 
-        double k_orient = 50;
+        double k_orient = 10;
         Eigen::Vector3d angular_vel = 2.0 * k_orient * q_err.vec();
 
         Eigen::VectorXd cart_vel(6);
