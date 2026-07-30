@@ -567,11 +567,14 @@ int main(int argc, const char** argv) {
     mju_error("Could not initialize GLFW");
   }
 
-  GLFWwindow* window = glfwCreateWindow(1200, 900, "Demo", NULL, NULL);
+  GLFWwindow* window = glfwCreateWindow(1280, 720, "Teleop Sim.", NULL, NULL);
   glfwMakeContextCurrent(window);
   glfwSwapInterval(1);
 
   mjv_defaultCamera(&cam);
+  cam.type = mjCAMERA_FIXED;
+  cam.fixedcamid = mj_name2id(m, mjOBJ_CAMERA, "teleop_camera");
+
   mjv_defaultOption(&opt);
   mjv_defaultScene(&scn);
   mjr_defaultContext(&con);

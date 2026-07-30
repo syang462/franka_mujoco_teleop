@@ -1,0 +1,5 @@
+#!/usr/bin/env python3
+
+from gui_controller.gui_controller_node import main
+
+main()

@@ -35,3 +35,6 @@ ERROR: Load model error: XML Error: Schema violation: unrecognized attribute: 'c
 Element 'geom', line 22
 
 
+Thu Jul 30 14:01:56 2026
+ERROR: mj_contactParam: Invalid condim value: 394943
+

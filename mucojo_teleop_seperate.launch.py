@@ -26,6 +26,10 @@ def generate_launch_description():
         ExecuteProcess(
             cmd=['ros2', 'run', 'controller_node', 'controller_node', model_path],
             output='screen'
+        ),
+        ExecuteProcess(
+            cmd=['ros2', 'run', 'gui_controller', 'gui_controller_node'],
+            output='screen'
         )
     ])
 

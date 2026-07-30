@@ -12,6 +12,9 @@ class CameraNode : public rclcpp::Node
 public:
   CameraNode() : Node("camera_node")
   {
+    int req_w = this->declare_parameter("width", 1280);
+    int req_h = this->declare_parameter("height", 720);
+
     publisher_ = this->create_publisher<sensor_msgs::msg::Image>("/camera/image_raw", 10);
 
     auto available = find_available_cameras();
@@ -45,10 +48,16 @@ public:
       return;
     }
 
-    cap_.set(cv::CAP_PROP_FRAME_WIDTH, 640);
-    cap_.set(cv::CAP_PROP_FRAME_HEIGHT, 480);
+    if (req_w > 0 && req_h > 0) {
+      cap_.set(cv::CAP_PROP_FRAME_WIDTH, req_w);
+      cap_.set(cv::CAP_PROP_FRAME_HEIGHT, req_h);
+    }
 
-    RCLCPP_INFO(this->get_logger(), "Opened camera %d at /dev/video%d", camera_id, camera_id);
+    int cam_w = static_cast<int>(cap_.get(cv::CAP_PROP_FRAME_WIDTH));
+    int cam_h = static_cast<int>(cap_.get(cv::CAP_PROP_FRAME_HEIGHT));
+
+    RCLCPP_INFO(this->get_logger(), "Opened camera %d at /dev/video%d — resolution: %dx%d",
+                camera_id, camera_id, cam_w, cam_h);
 
     timer_ = this->create_wall_timer(
       std::chrono::milliseconds(33),
