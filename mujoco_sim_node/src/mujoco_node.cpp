@@ -230,7 +230,6 @@ Eigen::MatrixXd get_jacobian_reduced(mjModel* model, mjData* data, int body_id, 
 }
 
 
-
 Eigen::VectorXd get_external_force(
     mjModel* model,
     mjData* data,
@@ -251,6 +250,45 @@ Eigen::VectorXd get_external_force(
     }
 
     // ---------------------------------------------------------
+    // Joint velocities (needed for friction model)
+    // ---------------------------------------------------------
+    Eigen::VectorXd qvel(n);
+    for (int i = 0; i < n; ++i) {
+        int dof_adr = model->jnt_dofadr[arm_joint_ids[i]];
+        qvel(i) = data->qvel[dof_adr];
+    }
+
+    // ---------------------------------------------------------
+    // "True" friction — physically present, corrupts the sensor
+    // reading exactly like a real robot's actual joint friction.
+    // Coulomb (stiction) + viscous terms. tanh() gives a smooth
+    // sign() so it's well-behaved near qvel == 0.
+    // ---------------------------------------------------------
+// Physically-motivated guess: friction scaled from each joint's rated
+// torque (a real spec, not assumed), using typical harmonic-drive
+// friction fractions (~1.5% Coulomb, ~4x viscous) as an engineering
+// rule of thumb. NOT calibrated to a real Panda — see caveat below.
+static constexpr double kFrictionScale = 0.50; // tune this
+
+static const Eigen::VectorXd true_coulomb =
+    kFrictionScale * (Eigen::VectorXd(7) << 1.3, 1.3, 1.3, 1.3, 0.18, 0.18, 0.18).finished();
+static const Eigen::VectorXd true_viscous =
+    kFrictionScale * (Eigen::VectorXd(7) << 5.2, 5.2, 5.2, 5.2, 0.72, 0.72, 0.72).finished();
+static constexpr double kStictionSharpness = 60.0; // ~3 / 0.05 rad/s assumed breakaway velocity
+
+
+    Eigen::VectorXd tau_friction_true(n);
+    for (int i = 0; i < n; ++i) {
+        tau_friction_true(i) =
+            true_coulomb(i) * std::tanh(kStictionSharpness * qvel(i)) +
+            true_viscous(i) * qvel(i);
+    }
+
+    // Physically, friction acts as a drag torque opposing motion, so it
+    // reduces the torque the sensor sees relative to pure rigid-body demand.
+    tau_measured -= tau_friction_true;
+
+    // ---------------------------------------------------------
     // Apply sensor noise
     // ---------------------------------------------------------
     static std::random_device rd;
@@ -266,7 +304,7 @@ Eigen::VectorXd get_external_force(
     }
 
     // ---------------------------------------------------------
-    // Model torque
+    // Model torque (rigid-body dynamics only — no friction)
     // ---------------------------------------------------------
     Eigen::VectorXd tau_model_full(model->nv);
 
@@ -283,6 +321,19 @@ Eigen::VectorXd get_external_force(
         int dof_adr = model->jnt_dofadr[arm_joint_ids[i]];
         tau_model(i) = tau_model_full(dof_adr);
     }
+
+    // ---------------------------------------------------------
+    // "Estimated" friction — what the robot's internal model
+    // *believes* friction is. Deliberately imperfect (scaled off
+    // true values) so it doesn't fully cancel tau_friction_true
+    // above. This mismatch is what leaks into tau_ext, just like
+    // a real robot's onboard friction compensation never being
+    // perfectly calibrated.
+    // ---------------------------------------------------------
+    static const double kModelError = 0.90; // model believes friction is 75% of true value
+    Eigen::VectorXd tau_friction_estimated = kModelError * tau_friction_true;
+
+    tau_model -= tau_friction_estimated;
 
     // ---------------------------------------------------------
     // External torque
@@ -312,19 +363,13 @@ Eigen::VectorXd get_external_force(
         }
     }
 
-    // Only publish once when crossing the threshold.
     if (threshold_exceeded && !torque_threshold_exceeded) {
-
         std_msgs::msg::Int32 msg;
         msg.data = 1;
-
         mode_pub->publish(msg);
-
         torque_threshold_exceeded = true;
     }
     else if (!threshold_exceeded) {
-        // Re-arm the trigger once torque falls back below
-        // all thresholds.
         torque_threshold_exceeded = false;
     }
 
@@ -332,25 +377,14 @@ Eigen::VectorXd get_external_force(
     // External wrench
     // ---------------------------------------------------------
     Eigen::MatrixXd J =
-        get_jacobian_reduced(
-            model,
-            data,
-            body_id,
-            arm_joint_ids
-        );
+        get_jacobian_reduced(model, data, body_id, arm_joint_ids);
 
     Eigen::MatrixXd Jt = J.transpose();
-
-    Eigen::MatrixXd JtT_Jt =
-        Jt.transpose() * Jt;
-
+    Eigen::MatrixXd JtT_Jt = Jt.transpose() * Jt;
     Eigen::MatrixXd damped_inv =
-        (JtT_Jt +
-         damping * Eigen::MatrixXd::Identity(6, 6))
-        .inverse();
+        (JtT_Jt + damping * Eigen::MatrixXd::Identity(6, 6)).inverse();
 
-    Eigen::VectorXd F_ext =
-        damped_inv * Jt.transpose() * tau_ext;
+    Eigen::VectorXd F_ext = damped_inv * Jt.transpose() * tau_ext;
 
     return F_ext;
 }

@@ -264,7 +264,7 @@ private:
 
         
 
-        F_ext *= 1; //0.3
+        F_ext *= 0.25;//0.25; //0.3
 
         Eigen::Vector3d robot_force_in(-F_ext.x(), -F_ext.y(), -F_ext.z());
 
@@ -281,7 +281,7 @@ private:
         static geometry_msgs::msg::Vector3 filtered_force;
         static bool initialized = false;
         if (USE_LOW_PASS_FILTER) {
-            const double alpha = 0.1;
+            const double alpha = 0.01;
             if (!initialized) { filtered_force = force_out; initialized = true; }
             else {
                 filtered_force.x = alpha * force_out.x + (1.0 - alpha) * filtered_force.x;
