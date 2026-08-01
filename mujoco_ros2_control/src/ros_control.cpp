@@ -55,10 +55,13 @@ std::array<int, 7> torque_sensor_adrs_;
 
 const int N_ARM_JOINTS = 7;
 
+std::mutex sim_mutex_;      // guards all access to mjModel*/mjData* (m, d)
+
 // keyboard callback
 void keyboard(GLFWwindow* window, int key, int scancode, int act, int mods) {
   // backspace: reset simulation
   if (act==GLFW_PRESS && key==GLFW_KEY_BACKSPACE) {
+    std::lock_guard<std::mutex> lock(sim_mutex_);
     mj_resetData(m, d);
     mj_forward(m, d);
   }
@@ -290,7 +293,6 @@ struct RobotState {
     rclcpp::Time stamp;
 };
 
-std::mutex sim_mutex_;      // guards all access to mjModel*/mjData* (m, d)
 std::mutex state_mutex_;    // guards latest_state_ (cheap struct copy only)
 RobotState latest_state_;
 

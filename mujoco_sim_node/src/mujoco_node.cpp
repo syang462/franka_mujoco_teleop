@@ -72,9 +72,12 @@ std::array<int, 7> torque_sensor_adrs_;
 
 const int N_ARM_JOINTS = 7;
 
+std::mutex sim_mutex_;      // guards all access to mjModel*/mjData* (m, d)
+
 // keyboard callback
 void keyboard(GLFWwindow* window, int key, int scancode, int act, int mods) {
   if (act==GLFW_PRESS && key==GLFW_KEY_BACKSPACE) {
+    std::lock_guard<std::mutex> lock(sim_mutex_);
     mj_resetData(m, d);
     mj_forward(m, d);
   }
@@ -226,20 +229,30 @@ Eigen::MatrixXd get_jacobian_reduced(mjModel* model, mjData* data, int body_id, 
     return jac_reduced;
 }
 
-// Computes the external wrench at `body_id`, equivalent to Franka's O_F_ext_hat_K.
-Eigen::VectorXd get_external_force(mjModel* model, mjData* data,
-                                    int body_id,
-                                    const std::vector<int>& arm_joint_ids,
-                                    const Eigen::VectorXd& noise_std,
-                                    double damping = 1e-4)
+
+
+Eigen::VectorXd get_external_force(
+    mjModel* model,
+    mjData* data,
+    int body_id,
+    const std::vector<int>& arm_joint_ids,
+    const Eigen::VectorXd& noise_std,
+    const Eigen::VectorXd& torque_thresholds,
+    rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr mode_pub,
+    double damping = 1e-4)
 {
     const int n = static_cast<int>(arm_joint_ids.size()); // 7
 
     Eigen::VectorXd tau_measured(n);
+
     for (int i = 0; i < n; ++i) {
-        tau_measured(i) = data->sensordata[torque_sensor_adrs_[i] + 2];
+        tau_measured(i) =
+            data->sensordata[torque_sensor_adrs_[i] + 2];
     }
 
+    // ---------------------------------------------------------
+    // Apply sensor noise
+    // ---------------------------------------------------------
     static std::random_device rd;
     static std::mt19937 generator(rd());
 
@@ -252,24 +265,92 @@ Eigen::VectorXd get_external_force(mjModel* model, mjData* data,
         tau_measured(i) += noise_distribution(generator);
     }
 
-
+    // ---------------------------------------------------------
+    // Model torque
+    // ---------------------------------------------------------
     Eigen::VectorXd tau_model_full(model->nv);
-    mj_rne(model, data, /*flg_acc=*/1, tau_model_full.data());
+
+    mj_rne(
+        model,
+        data,
+        /*flg_acc=*/1,
+        tau_model_full.data()
+    );
 
     Eigen::VectorXd tau_model(n);
+
     for (int i = 0; i < n; ++i) {
         int dof_adr = model->jnt_dofadr[arm_joint_ids[i]];
         tau_model(i) = tau_model_full(dof_adr);
     }
 
+    // ---------------------------------------------------------
+    // External torque
+    // ---------------------------------------------------------
     Eigen::VectorXd tau_ext = tau_measured - tau_model;
 
-    Eigen::MatrixXd J = get_jacobian_reduced(model, data, body_id, arm_joint_ids); // 6 x n
-    Eigen::MatrixXd Jt = J.transpose();   // n x 6
+    // ---------------------------------------------------------
+    // Check torque thresholds
+    // ---------------------------------------------------------
+    static bool torque_threshold_exceeded = false;
 
-    Eigen::MatrixXd JtT_Jt = Jt.transpose() * Jt; // 6x6
-    Eigen::MatrixXd damped_inv = (JtT_Jt + damping * Eigen::MatrixXd::Identity(6, 6)).inverse();
-    Eigen::VectorXd F_ext = damped_inv * Jt.transpose() * tau_ext; // 6x1: [force; torque]
+    bool threshold_exceeded = false;
+
+    for (int i = 0; i < n; ++i) {
+        if (std::abs(tau_ext(i)) > torque_thresholds(i)) {
+            threshold_exceeded = true;
+
+            std::cout
+                << "Torque threshold exceeded on J"
+                << (i + 1)
+                << ": "
+                << tau_ext(i)
+                << " Nm (threshold = "
+                << torque_thresholds(i)
+                << " Nm)"
+                << std::endl;
+        }
+    }
+
+    // Only publish once when crossing the threshold.
+    if (threshold_exceeded && !torque_threshold_exceeded) {
+
+        std_msgs::msg::Int32 msg;
+        msg.data = 1;
+
+        mode_pub->publish(msg);
+
+        torque_threshold_exceeded = true;
+    }
+    else if (!threshold_exceeded) {
+        // Re-arm the trigger once torque falls back below
+        // all thresholds.
+        torque_threshold_exceeded = false;
+    }
+
+    // ---------------------------------------------------------
+    // External wrench
+    // ---------------------------------------------------------
+    Eigen::MatrixXd J =
+        get_jacobian_reduced(
+            model,
+            data,
+            body_id,
+            arm_joint_ids
+        );
+
+    Eigen::MatrixXd Jt = J.transpose();
+
+    Eigen::MatrixXd JtT_Jt =
+        Jt.transpose() * Jt;
+
+    Eigen::MatrixXd damped_inv =
+        (JtT_Jt +
+         damping * Eigen::MatrixXd::Identity(6, 6))
+        .inverse();
+
+    Eigen::VectorXd F_ext =
+        damped_inv * Jt.transpose() * tau_ext;
 
     return F_ext;
 }
@@ -286,8 +367,6 @@ struct RobotState {
     Eigen::Vector3d ee_angular_vel;
     rclcpp::Time stamp;
 };
-
-std::mutex sim_mutex_;      // guards all access to mjModel*/mjData* (m, d)
 
 rclcpp::TimerBase::SharedPtr robot_loop_timer_;
 
@@ -329,13 +408,20 @@ public:
             "/robot/jacobian", 1);
         wrench_pub_ = this->create_publisher<geometry_msgs::msg::WrenchStamped>(
             "/robot/external_wrench", 1);
+
+        mode_pub_ = this->create_publisher<std_msgs::msg::Int32>("/toggle_mode", 10);
+
     }
 
 private:
 
     Eigen::VectorXd d_gains{{50, 50, 45, 45, 15, 10, 5}};
 
-    float noiseVal = 0.5;
+    const Eigen::VectorXd torque_thresholds =
+    (Eigen::VectorXd(7) << 
+        20.0, 20.0, 18.0, 18.0, 16.0, 14.0, 12.0).finished();
+
+    float noiseVal = 0.01;
     Eigen::VectorXd noise_std{{noiseVal, noiseVal, noiseVal, noiseVal, noiseVal, noiseVal, noiseVal}};
 
     std::mutex cmd_mutex_;
@@ -348,6 +434,9 @@ private:
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr ee_pose_pub_;
     rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr jacobian_pub_;
     rclcpp::Publisher<geometry_msgs::msg::WrenchStamped>::SharedPtr wrench_pub_;
+
+    rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr mode_pub_;
+
 
     static constexpr double kGripperCtrlMax   = 255.0;
     static constexpr double kMaxGripperWidth  = 0.08;   // meters, full open — calibrate to your MJCF
@@ -383,7 +472,7 @@ private:
         if (msg->data == 1) {
             commandGripper(0.0, 0.1, 200.0, 0.005, 0.005, true, false);
         } else if (msg->data == 2) {
-            commandGripper(kMaxGripperWidth, 0.1, 200.0, 0.0, 0.0, false, true);
+            commandGripper(kMaxGripperWidth, 0.5, 200.0, 0.0, 0.0, false, true);
         }
     }
 
@@ -481,7 +570,7 @@ private:
             new_state.q    = get_current_joint_positions(m, d, joint_ids_local);
             new_state.qdot = get_current_joint_velocities(m, d, joint_ids_local);
             new_state.jacobian = get_jacobian_reduced(m, d, ee_body_id, joint_ids_local);
-            new_state.external_force = get_external_force(m, d, ee_body_id, joint_ids_local, noise_std);
+            new_state.external_force = get_external_force(m, d, ee_body_id, joint_ids_local, noise_std, torque_thresholds, mode_pub_);
 
             get_end_effector_pose(d, ee_body_id, new_state.ee_pos, new_state.ee_orientation);
             get_end_effector_velocity(d, ee_body_id, new_state.ee_vel, new_state.ee_angular_vel);
@@ -572,7 +661,7 @@ int main(int argc, const char** argv) {
   glfwSwapInterval(1);
 
   mjv_defaultCamera(&cam);
-  cam.type = mjCAMERA_FIXED;
+  //cam.type = mjCAMERA_FIXED;
   cam.fixedcamid = mj_name2id(m, mjOBJ_CAMERA, "teleop_camera");
 
   mjv_defaultOption(&opt);

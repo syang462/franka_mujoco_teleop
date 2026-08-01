@@ -174,6 +174,8 @@ private:
     bool have_jacobian_ = false;
     bool have_wrench_ = false;
 
+    bool reachedStart = false;
+
     rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_state_sub_;
     rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr ee_pose_sub_;
     rclcpp::Subscription<std_msgs::msg::Float64MultiArray>::SharedPtr jacobian_sub_;
@@ -206,7 +208,7 @@ private:
         Eigen::Quaterniond haptic_orientation(
             msg->orientation.w, msg->orientation.x, msg->orientation.y, msg->orientation.z);
 
-        const double x_min=0.2, x_max=0.7;
+        const double x_min=0.2, x_max=0.9;
         const double y_min=-0.25, y_max=0.25;
         const double z_min=0.03, z_max=0.70;
 
@@ -249,7 +251,7 @@ private:
 
         target_pose.x() = std::clamp(target_pose.x(), x_min, x_max);
         target_pose.y() = std::clamp(target_pose.y(), y_min, y_max);
-        target_pose.z() = std::clamp(target_pose.z(), z_min, z_max);
+        target_pose.z() = std::clamp(target_pose.z(), z_min, z_max) + 0.1;
 
         Eigen::Quaterniond rot_1(Eigen::AngleAxisd(-M_PI/2, Eigen::Vector3d::UnitZ()));
         Eigen::Quaterniond rot_0(Eigen::AngleAxisd(M_PI/2, Eigen::Vector3d::UnitZ()));
@@ -262,7 +264,7 @@ private:
 
         
 
-        F_ext *= 0.25; //0.3
+        F_ext *= 1; //0.3
 
         Eigen::Vector3d robot_force_in(-F_ext.x(), -F_ext.y(), -F_ext.z());
 
@@ -279,7 +281,7 @@ private:
         static geometry_msgs::msg::Vector3 filtered_force;
         static bool initialized = false;
         if (USE_LOW_PASS_FILTER) {
-            const double alpha = 0.01;
+            const double alpha = 0.1;
             if (!initialized) { filtered_force = force_out; initialized = true; }
             else {
                 filtered_force.x = alpha * force_out.x + (1.0 - alpha) * filtered_force.x;
@@ -337,6 +339,7 @@ private:
             const double k_home = 2.0;
             const double max_home_vel = 0.5;
 
+            reachedStart = false;
             Eigen::VectorXd target_qdot_m1(N_ARM_JOINTS);
             for (int i = 0; i < N_ARM_JOINTS; i++) {
                 double err = home_q[i] - state.q(i);
@@ -349,6 +352,8 @@ private:
         }
 
         Eigen::Vector3d error = state.ee_pos - target_pose;
+        
+        //RCLCPP_INFO(this->get_logger(), "Current: [%.4f, %.4f, %.4f] | Target: [%.4f, %.4f, %.4f] | Error: [%.4f, %.4f, %.4f]",  state.ee_pos.x(), state.ee_pos.y(), state.ee_pos.z(),target_pose.x(), target_pose.y(), target_pose.z(), error.x(), error.y(), error.z());
 
         Eigen::Vector3d effective_force;
         
@@ -358,17 +363,33 @@ private:
         }else{
             effective_force = Eigen::Vector3d::Zero();
         }
+
+        double k_orient;
+        double setStiffness;
+        if(error.norm() > 0.03 && !reachedStart){
+            setStiffness = 400.0;
+            d_ = 2.0 * zeta * std::sqrt(m_ * setStiffness);
+            k_orient   = 3.0;
+            effective_force = Eigen::Vector3d::Zero();
+
+            RCLCPP_INFO(this->get_logger(), "Error: %.4f", error.norm());
+        }else{
+
+            setStiffness = k_;
+            d_ = 2.0 * zeta * std::sqrt(m_ * setStiffness);
+            k_orient = 10.0;
+            reachedStart = true;
+        }
         // state.external_force.head<3>() is sitting right here whenever
         // you're ready to feed measured contact force into this admittance law.
 
-        Eigen::Vector3d acceleration = (effective_force - (d_ * ee_vel_) - (k_ * error)) / m_;
+        Eigen::Vector3d acceleration = (effective_force - (d_ * ee_vel_) - (setStiffness * error)) / m_;
         ee_vel_ += acceleration * dt;
 
         Eigen::Quaterniond q_err = target_orientation * state.ee_orientation.inverse();
         q_err.normalize();
         if (q_err.w() < 0.0) q_err.coeffs() = -q_err.coeffs();
 
-        double k_orient = 10;
         Eigen::Vector3d angular_vel = 2.0 * k_orient * q_err.vec();
 
         Eigen::VectorXd cart_vel(6);

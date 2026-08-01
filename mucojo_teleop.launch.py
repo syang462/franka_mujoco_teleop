@@ -22,6 +22,7 @@ def generate_launch_description():
         ExecuteProcess(
             cmd=['ros2', 'run', 'mujoco_ros2_robot', 'ros_control', model_path],
             output='screen'
-        )
+        ),
+        
     ])
 
