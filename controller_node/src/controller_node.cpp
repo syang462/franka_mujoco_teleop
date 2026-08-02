@@ -49,6 +49,13 @@ public:
     {
         last_time_ = this->now();
 
+        this->declare_parameter("use_topic_input", false);
+        use_topic_input_ = this->get_parameter("use_topic_input").as_bool();
+        if (use_topic_input_) {
+            RCLCPP_INFO(this->get_logger(),
+                "Topic input enabled: target from /target_pose, force from /robot_force");
+        }
+
         timer_ = this->create_wall_timer(
             std::chrono::milliseconds(1),
             std::bind(&HapticControllerNode::controlLoop, this));
@@ -125,6 +132,15 @@ public:
             "/stiffness", 10,
             std::bind(&HapticControllerNode::stiffnessCallback, this, std::placeholders::_1));
 
+        // ---- Optional topic-driven input (use_topic_input:=true) ----
+        target_pose_sub_ = this->create_subscription<geometry_msgs::msg::PoseStamped>(
+            "/target_pose", 1,
+            std::bind(&HapticControllerNode::targetPoseCallback, this, std::placeholders::_1));
+
+        robot_force_sub_ = this->create_subscription<geometry_msgs::msg::Vector3>(
+            "/robot_force", 1,
+            std::bind(&HapticControllerNode::robotForceCallback, this, std::placeholders::_1));
+
         // ---- Outputs ----
         target_vel_pub_ = this->create_publisher<std_msgs::msg::Float64MultiArray>(
             "/target_joint_velocities", 1);
@@ -147,6 +163,7 @@ private:
     double k_ = 200; //100 -> 2000
     double d_ = 2.0 * zeta * std::sqrt(m_ * k_);
     int mode_ = 0;
+    bool use_topic_input_ = false;
 
     Eigen::VectorXd home_q{{0.0, 0.0, 0.0, -M_PI/2.0, 0.0, M_PI/2.0, M_PI/4.0}};
 
@@ -160,7 +177,7 @@ private:
     double height_offset_ = 0.3;
     double max_force_output_ = 5.0;
 
-    Eigen::Vector3d robot_force_;
+    Eigen::Vector3d robot_force_ = Eigen::Vector3d::Zero();
 
     bool inside_workspace = false;
     bool nearSwitch = false;
@@ -183,6 +200,8 @@ private:
     rclcpp::Subscription<geometry_msgs::msg::Pose>::SharedPtr haptic_pose_sub_;
     rclcpp::Subscription<std_msgs::msg::Int32>::SharedPtr mode_sub_;
     rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr stiffness_sub_;
+    rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr target_pose_sub_;
+    rclcpp::Subscription<geometry_msgs::msg::Vector3>::SharedPtr robot_force_sub_;
 
 
     rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr target_vel_pub_;
@@ -195,6 +214,9 @@ private:
     }
 
     void hapticPoseCallback(const geometry_msgs::msg::Pose::SharedPtr msg) {
+        if (use_topic_input_) {
+            return;
+        }
         target_pose.x() = (-msg->position.z * position_scale_x_) + 0.35;
         target_pose.y() = -msg->position.x * position_scale_y_;
         target_pose.z() = (msg->position.y * position_scale_z_) + height_offset_;
@@ -259,10 +281,29 @@ private:
         target_orientation = (rot_1 * haptic_orientation * rot_0 * base_down).normalized();
     }
 
+    void targetPoseCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg) {
+        if (!use_topic_input_) {
+            return;
+        }
+        target_pose << msg->pose.position.x, msg->pose.position.y, msg->pose.position.z;
+        target_orientation = Eigen::Quaterniond(
+            msg->pose.orientation.w, msg->pose.orientation.x,
+            msg->pose.orientation.y, msg->pose.orientation.z);
+    }
+
+    void robotForceCallback(const geometry_msgs::msg::Vector3::SharedPtr msg) {
+        if (!use_topic_input_) {
+            return;
+        }
+        robot_force_ << msg->x, msg->y, msg->z;
+    }
+
     void robotForceToHapticForce(Eigen::VectorXd F_ext)
     {
 
-        
+        if (use_topic_input_) {
+            return;
+        }
 
         F_ext *= 0.25;//0.25; //0.3
 

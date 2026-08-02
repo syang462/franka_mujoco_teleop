@@ -41,3 +41,23 @@ mujoco_sim_node
 ros2 topic pub --once /stiffness std_msgs/msg/Float64 "{data: 2000}"
 
 ros2 topic pub --once /stiffness std_msgs/msg/Float64 "{data: 200}"
+
+
+# Topic-driven controller input (test pose + force control without the haptic device)
+
+ros2 run controller_node controller_node --ros-args -p use_topic_input:=true
+
+ros2 topic pub /toggle_mode std_msgs/msg/Int32 "{data: 1}" --once
+
+# Move to a target pose (once)
+ros2 topic pub /target_pose geometry_msgs/msg/PoseStamped "{header: {frame_id: base_link}, pose: {position: {x: 0.5, y: 0.0, z: 0.15}, orientation: {w: 0.0, x: 1.0, y: 0.0, z: 0.0}}}" --once
+
+# Stream a target pose at 20 Hz
+ros2 topic pub -r 20 /target_pose geometry_msgs/msg/PoseStamped "{header: {frame_id: base_link}, pose: {position: {x: 0.5, y: 0.2, z: 0.35}, orientation: {w: 1.0, x: 0.0, y: 0.0, z: 0.0}}}"
+
+# Robot force command (effective_force = 0.5 * robot_force_)
+ros2 topic pub /robot_force geometry_msgs/msg/Vector3 "{x: 5.0, y: 0.0, z: 0.0}" --once
+
+# Sweeping force at 50 Hz
+ros2 topic pub -r 50 /robot_force geometry_msgs/msg/Vector3 "{x: 3.0, y: 3.0, z: 0.0}"
+
