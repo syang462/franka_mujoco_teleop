@@ -330,7 +330,7 @@ static constexpr double kStictionSharpness = 60.0; // ~3 / 0.05 rad/s assumed br
     // a real robot's onboard friction compensation never being
     // perfectly calibrated.
     // ---------------------------------------------------------
-    static const double kModelError = 0.90; // model believes friction is 75% of true value
+    static const double kModelError = 0.90; // model believes friction is 75% of true value //adjist up to maybe 1.1 as well
     Eigen::VectorXd tau_friction_estimated = kModelError * tau_friction_true;
 
     tau_model -= tau_friction_estimated;
