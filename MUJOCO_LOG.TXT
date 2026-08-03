@@ -38,3 +38,18 @@ Element 'geom', line 22
 Thu Jul 30 14:01:56 2026
 ERROR: mj_contactParam: Invalid condim value: 394943
 
+Mon Aug  3 15:19:41 2026
+ERROR: Load model error: XML parse error 6:
+Error=XML_ERROR_PARSING_ELEMENT ErrorID=6 (0x6) Line number=28
+
+
+Mon Aug  3 16:44:40 2026
+ERROR: Load model error: XML Error: problem reading attribute 'priority'
+Element 'geom', line 38
+
+
+Mon Aug  3 16:44:53 2026
+ERROR: Load model error: XML Error: problem reading attribute 'priority'
+Element 'geom', line 38
+
+

@@ -230,6 +230,7 @@ private:
         Eigen::Quaterniond haptic_orientation(
             msg->orientation.w, msg->orientation.x, msg->orientation.y, msg->orientation.z);
 
+
         const double x_min=0.2, x_max=0.9;
         const double y_min=-0.25, y_max=0.25;
         const double z_min=0.03, z_max=0.70;

@@ -695,7 +695,7 @@ int main(int argc, const char** argv) {
   glfwSwapInterval(1);
 
   mjv_defaultCamera(&cam);
-  //cam.type = mjCAMERA_FIXED;
+  cam.type = mjCAMERA_FIXED;
   cam.fixedcamid = mj_name2id(m, mjOBJ_CAMERA, "teleop_camera");
 
   mjv_defaultOption(&opt);
